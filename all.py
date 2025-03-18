@@ -550,9 +550,6 @@ def search_statmuse(query: str) -> str:
   soup = BeautifulSoup(page.content, "html.parser")
   return soup.find("div", class_="flex flex-col justify-between @lg/hero:items-start").text
 
-# search_out = search_statmuse("Who is the highest scoring player on the Los Angeles Lakers of all time")
-# print(search_out)
-
 statmuse_tool = Tool(
     name = "Statmuse",
     func = search_statmuse,

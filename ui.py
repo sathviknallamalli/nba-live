@@ -38,6 +38,12 @@ from langchain.agents.format_scratchpad.openai_tools import (
 from langchain.agents.output_parsers.openai_tools import OpenAIToolsAgentOutputParser
 from langchain.agents import AgentExecutor
 from langchain_community.utilities import SerpAPIWrapper
+from judgeval import JudgmentClient
+from judgeval.data import Example
+from judgeval.scorers import AnswerRelevancyScorer
+from judgeval.scorers import ContextualRelevancyScorer
+from judgeval.scorers import FaithfulnessScorer
+import uuid
 
 load_dotenv()
 open_ai_key = os.getenv("OPENAI_APIKEY")
@@ -46,6 +52,9 @@ serp_api_key = os.getenv("SERP_APIKEY")
 openai_client = OpenAI(
   api_key=open_ai_key,
 )
+client = JudgmentClient()
+scorer = AnswerRelevancyScorer(threshold=0.8)
+
 
 with open('./teams.json', 'r') as file:
     id_to_team = json.load(file)
@@ -103,10 +112,13 @@ def generate_queries_with_gpt(key_moments, game_info):
         f"Here are the key moments from the game so far:\n\n"
     )
 
-    for moment in key_moments:
-        prompt += f"{moment['time']}: {moment['description']} (Event: {moment['event']})\n"
+    key_moment_str = ""
 
-    prompt += (
+    for moment in key_moments:
+        key_moment_str += f"{moment['time']}: {moment['description']} (Event: {moment['event']})\n"
+
+    prompt += key_moment_str
+    instruction = (
         "\nBased on these key moments, please generate 3-5 stat-driven queries that focus on historical comparisons, "
         "team trends, and notable player achievements in past games. Avoid hypothetical or predictive questions. "
         "The queries should be actionable and reflect a broader understanding of NBA stats and trends. "
@@ -116,6 +128,9 @@ def generate_queries_with_gpt(key_moments, game_info):
         "Make the queries specific, avoid general trend comparisons. Specify clear stats or metrics and get creative with them."
         "Avoid any trailing or leading text in your ouput and just output the queries."
     )
+    prompt += instruction
+
+    
 
     completion = openai_client.chat.completions.create(
         model="gpt-3.5-turbo",
@@ -123,6 +138,57 @@ def generate_queries_with_gpt(key_moments, game_info):
             {"role": "user", "content": prompt}
         ]
     )
+
+    random_uuid = str(uuid.uuid4())
+    example = Example(
+        input=prompt,
+        actual_output=completion.choices[0].message.content,
+    )
+    scorer = AnswerRelevancyScorer(threshold=0.8)
+
+    results = client.run_evaluation(
+        eval_run_name="relevant_eval_" + random_uuid,
+        examples=[example],
+        scorers=[scorer],
+        model="gpt-4o",
+    )
+    print(f"JUDGMENT'S SCORE on generating queries: {results[0].scorers_data[0].score} because {results[0].scorers_data[0].reason}" )
+
+
+
+    example = Example(
+        input=instruction,
+        actual_output=completion.choices[0].message.content,
+        retrieval_context=[key_moment_str]
+    )
+    # supply your own threshold
+    scorer = ContextualRelevancyScorer(threshold=0.8)
+
+    results = client.run_evaluation(
+        eval_run_name="contextuall_relevant_eval_" + random_uuid,
+        examples=[example],
+        scorers=[scorer],
+        model="gpt-4o",
+    )
+    print(f"JUDGMENT'S SCORE on how good the key moments are to the output: {results[0].scorers_data[0].score} because {results[0].scorers_data[0].reason}" )
+
+
+
+    example = Example(
+        input=instruction,
+        actual_output=completion.choices[0].message.content,
+        retrieval_context=[key_moment_str]
+    )
+    # supply your own threshold
+    scorer = FaithfulnessScorer(threshold=0.8)
+
+    results = client.run_evaluation(
+        eval_run_name="faithful_eval_" + random_uuid,
+        examples=[example],
+        scorers=[scorer],
+        model="gpt-4o",
+    )
+    print(f"JUDGMENT'S SCORE on how faithful the generations are to the key moments: {results[0].scorers_data[0].score} because {results[0].scorers_data[0].reason}" )
 
     return completion.choices[0].message.content
 def initialize_game_state(hometeam, awayteam):
@@ -345,7 +411,9 @@ def build_game_stats(play_data, game_stats, summed_stats, hometeam, awayteam):
             print("COULDNT PARSE THIS")
             print(play["text"])
 
-
+        # print(parsed_play.keys())
+        if(len(parsed_play.keys() ) == 0):
+            return
         if parsed_play['shot_type'] == "free_throw" or parsed_play['shot_type'] == "two_pointer" or parsed_play['shot_type'] == "three_pointer":
             points, scorer, shot_type = parsed_play.get("points"), parsed_play.get("scorer"), parsed_play.get("shot_type")
             
@@ -714,12 +782,13 @@ def parse_table(table):
 ws_instance = None
 
 
-game_id = 401705015
+#----START HERE ----
+game_id = 401748704
 game_url = f"https://www.espn.com/nba/playbyplay/_/gameId/{game_id}"
 game_info = {
-    'team1': 'Boston Celtics', #home
-    'team2': 'Toronto Raptors', #away
-    'date': 'Decmber 31, 2024',
+    'team1': 'Los Angeles Lakers', #home
+    'team2': 'Charlotte Hornets', #away
+    'date': 'February 19, 2025',
 }
 current_window_of_plays = {}
 global_compound_queries = set()
@@ -839,7 +908,7 @@ def on_message(ws, message):
                                 # print(id_to_play[count_to_id[totallen - 1]])
                                 print("the val")
                                 print(play_count)
-                                print(count_to_id)
+                                # print(count_to_id)
                                 print(play_text)
                                 
                                 print("og play doesnt exist to replace")
@@ -897,6 +966,7 @@ def on_message(ws, message):
 
                                 compound_queries = generate_queries_with_gpt(key_moments_agg, game_info)
 
+
                                 compound_queries = compound_queries.strip().split('\n')
                                 compound_queries = [q.strip() for q in compound_queries if q.strip()]
                                 compound_queries = [re.sub(r'^\d+\.\s*', '', q.strip()) for q in compound_queries if q.strip()]
@@ -908,6 +978,24 @@ def on_message(ws, message):
                                         # print("----ANSWER---- " + thelist[-1]['output'])
                                         print(thelist[-1]['output'])
                                         print("------------------------------------------------------------------")
+
+                                        #evaluate the answer
+                                        example = Example(
+                                            input=cq,
+                                            actual_output=thelist[-1]['output'],
+                                        )
+                                        scorer = AnswerRelevancyScorer(threshold=0.8)
+
+                                        random_uuid = str(uuid.uuid4())
+                                        results = client.run_evaluation(
+                                            eval_run_name="answer_relevancy_eval_"+random_uuid,
+                                            examples=[example],
+                                            scorers=[scorer],
+                                            model="gpt-4o",
+                                        )
+                                        print(f"JUDGMENT'S SCORE on answer: {results[0].scorers_data[0].score} because {results[0].scorers_data[0].reason}" )
+
+
 
                                         query_output.append(thelist[-1]['output'])
                                         running_list.delete(1.0, tk.END)
@@ -1034,7 +1122,7 @@ def start_websocket_thread():
     Launch the WebSocket listener in a separate thread.
     """
     # ws_uri = "wss://echo.websocket.org"
-    ws_uri = "wss://pw58c9f642-1f2f-47a3-b1af-4f5bd61b99a4-35-91-9-49.fastcast.semfs.engsvc.go.com:9573/FastcastService/pubsub/profiles/12000?TrafficManager-Token=MTczNTY4MzkwMjMzMw==:vGFzkwO4GFoHSBbrNufKnD41OeQ="
+    ws_uri = "wss://pwa68a8c43-c8b1-426a-ba37-30fb5f61384d-34-220-251-175.fastcast.semfs.engsvc.go.com:9573/FastcastService/pubsub/profiles/12000?TrafficManager-Token=MTc0MDAyNzYwNTI0Mw==:1Ho0YbCeYy1g3nkogeOjqgZMWX8="
     ws_thread = threading.Thread(target=start_websocket, args=(ws_uri,))
     ws_thread.daemon = True
     ws_thread.start()
