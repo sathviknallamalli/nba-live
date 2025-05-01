@@ -59,10 +59,10 @@ def parse_table(table):
     
     return table_map
 
-def generate_queries_with_gpt(key_moments, game_info):
+def generate_queries_with_gpt(key_moments, game_info, context):
     prompt = (
-        f"We are watching a live NBA game between {game_info['team1']} and {game_info['team2']}"
-        f"Here are the key moments from the game so far:\n\n"
+        f"We are watching a live NBA game between {game_info['team1']} and {game_info['team2']}. Here is some context about the game: {context}\n\n"
+        f"Here are the most recent key moments from the game:\n\n"
     )
 
     key_moment_str = ""
@@ -76,8 +76,8 @@ def generate_queries_with_gpt(key_moments, game_info):
         "team trends, and notable player achievements in past games. Avoid hypothetical or predictive questions. "
         "The queries should be actionable and reflect a broader understanding of NBA stats and trends. "
         "Include queries about the game so far and comparisons to prior games this season or previous seasons."
-        "When referring to seasons, use the format '2021-22 season'."
-        "Avoid 'how' based qualitative questions and generate quantificable queries that can be answered with statistical data."
+        "This is a playoff game, frame your query around that."
+        "Avoid 'how' based qualitative questions and generate quantifiable queries that can be answered with statistical data."
         "Make the queries specific, avoid general trend comparisons. Specify clear stats or metrics and get creative with them."
         "Avoid any trailing or leading text in your ouput and just output the queries."
     )

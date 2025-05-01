@@ -31,7 +31,7 @@ def parse_play_text(play_text):
             shot_type = "missed_two_pointer"
         shooter = play_text.split(" misses")[0]
         return_obj = {"shot_type": shot_type, "shooter": shooter}
-    elif "COACH'S CHALLENGE" in play_text:
+    elif "COACH'S CHALLENGE" in play_text or "Coach's Challenge" in play_text:
         team = play_text.split()[1].replace("[", "").replace("]", "")
         return_obj = {"shot_type": "challenge", "team": team}
     elif "REVIEW" in play_text:
@@ -67,6 +67,9 @@ def parse_play_text(play_text):
         stealer = play_text.split(" steals")[0].split("(")[-1].strip()
         turnover_player = play_text.split("lost ball turnover")[0].strip()
         return_obj = {"shot_type": "turnover_steal", "turnover_player": turnover_player, "stealer": stealer}
+    elif "turnover" in play_text and "second" in play_text:
+        #this is a team turnover
+        return_obj = {"shot_type": "team_turnover"}
     elif "turnover" in play_text:
         turnover_player = (play_text.split()[0] + " " + play_text.split()[1]).strip()
         return_obj = {"shot_type": "turnover", "turnover_player": turnover_player}
@@ -361,6 +364,9 @@ def initialize_summed_state():
             "bad_passes": 0,
             "turnovers": 0,
         })
+
+# newdict = {"text": id_to_play_data[play_id]['text'], "id": id_to_play_data[play_id]['id'], "clock": id_to_play_data[play_id]['clock'], "period": id_to_play_data[play_id]['period'], "homeAway": id_to_play_data[play_id]['homeAway'] if "homeAway" in id_to_play_data[play_id] else ("home" if id_to_play_data[play_id]['team']['id'] == home_team_id else "away"), 
+#             "homeScore": id_to_play_data[play_id]['homeScore'], "awayScore": id_to_play_data[play_id]['awayScore']}
 
 def process_play_by_play(play_data):
     key_moments = []

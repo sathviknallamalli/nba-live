@@ -193,17 +193,70 @@ agent = (
 
 agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=False)
 
-thelist = list(agent_executor.stream({"input": "Cleveland Cavaliers first quarter shooting percentage"}))
-print(thelist[-1]['output'])
+# thelist = list(agent_executor.stream({"input": "Cleveland Cavaliers first quarter shooting percentage"}))
+# print(thelist[-1]['output'])
 
-thelist = list(agent_executor.stream({"input": "Evan Mobley rebounding stats"}))
-print(thelist[-1]['output'])
+# thelist = list(agent_executor.stream({"input": "Evan Mobley rebounding stats"}))
+# print(thelist[-1]['output'])
 
-thelist = list(agent_executor.stream({"input": "Darius Garland field goal percentage"}))
-print(thelist[-1]['output'])
+# thelist = list(agent_executor.stream({"input": "Darius Garland field goal percentage"}))
+# print(thelist[-1]['output'])
 
-thelist = list(agent_executor.stream({"input": "Cleveland Cavaliers first quarter turnover percentage"}))
-print(thelist[-1]['output'])
+# thelist = list(agent_executor.stream({"input": "Cleveland Cavaliers first quarter turnover percentage"}))
+# print(thelist[-1]['output'])
 
-thelist = list(agent_executor.stream({"input": "Evan Mobley defensive rebounds"}))
-print(thelist[-1]['output'])
+# thelist = list(agent_executor.stream({"input": "Evan Mobley defensive rebounds"}))
+# print(thelist[-1]['output'])
+
+
+
+def generate_queries_with_gpt(key_moments, game_info):
+    prompt = (
+        f"We are watching a live NBA game between {game_info['team1']} and {game_info['team2']}"
+        f"Here are the key moments from the game so far:\n\n"
+    )
+
+    key_moment_str = ""
+
+    for moment in key_moments:
+        key_moment_str += f"{moment['time']}: {moment['description']} (Event: {moment['event']})\n"
+
+    prompt += key_moment_str
+    instruction = (
+        "\nBased on these key moments, please generate 3-5 stat-driven queries that focus on historical comparisons, "
+        "team trends, and notable player achievements in past games. Avoid hypothetical or predictive questions. "
+        "The queries should be actionable and reflect a broader understanding of NBA stats and trends. "
+        "Include queries about the game so far and comparisons to prior games this season or previous seasons."
+        "When referring to seasons, use the format '2021-22 season'."
+        "Avoid 'how' based qualitative questions and generate quantificable queries that can be answered with statistical data."
+        "Make the queries specific, avoid general trend comparisons. Specify clear stats or metrics and get creative with them."
+        "Avoid any trailing or leading text in your ouput and just output the queries."
+    )
+    prompt += instruction
+
+    system_prompt = """
+        Your output must be list of JSON objects. Each JSON object should contain two keys: "query" and "type".
+        The "query" key should contain the generated query string, and the "type" key should indicate the type of query it is.
+        The "type" can be one of the following: "team" for team-related queries, "player" for player-related queries, or "game" for game-related queries.
+        An example of the output format is:
+        [
+            {"query": "What was the highest scoring game for the Boston Celtics in the 2021-22 season?", "type": "team"},
+            {"query": "How many points did Jayson Tatum score in the last game against the Orlando Magic?", "type": "player"},
+            {"query": "What was the final score of the last game between the Boston Celtics and Orlando Magic?", "type": "game"}
+        ]
+    """
+
+    
+
+    completion = openai_client.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt}
+        ]
+    )
+
+
+    return completion.choices[0].message.content
+
+

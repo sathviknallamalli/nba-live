@@ -13,6 +13,7 @@ import threading
 import tkinter as tk
 from websocket import WebSocketApp
 import requests
+import copy
 import json
 from dotenv import load_dotenv
 import threading
@@ -50,6 +51,7 @@ from utils import (
 from build_current_game import (
     build_game_stats
 )
+from autocomplete_entry import AutocompleteEntry
 
 
 with open('./teams.json', 'r') as file:
@@ -156,8 +158,6 @@ tools = [ summed_context_tool, context_tool, statmuse_tool, serpapi_tool]
 llm = ChatOpenAI(model="gpt-4o", temperature=0, api_key=open_ai_key)
 llm_with_tools = llm.bind_tools(tools)
 
-# tools = load_tools(["serpapi", "llm-math"], llm=llm, serpapi_api_key="d08e104f693e95d6dfa1194e4e560db5239643147352af8ed4881a9e5be5d7cd") + [statmuse_tool]
-
 prompt = ChatPromptTemplate.from_messages(
     [
         ("system", "You must provide only the strict answer to the query without any additional text, context, or explanation."),
@@ -181,14 +181,16 @@ agent = (
 agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=False)
 
 #----START HERE ----
-game_id = 401768035
+game_id = 401768058
 game_url = f"https://www.espn.com/nba/playbyplay/_/gameId/{game_id}"
 game_info = {
-    'team1': 'Cleveland Cavaliers', #home
-    'team2': 'Miami Heat', #away
+    'team1': 'Los Angeles Lakers', #home
+    'team2': 'Minnesota Timberwolves', #away
 }
-current_window_of_plays = {}
-global_compound_queries = set()
+game_context = "This is game 5 of a first round playoff series between the Lakers and Timberwolves."
+
+cur_count = 0
+cur_moments = []
 key_moments_agg = []
 key_moment_length_since_last_query = 0
 home_team_id = id_to_team[game_info['team1']]
@@ -246,23 +248,13 @@ def on_message(ws, message):
                 pattern = r'^/plays/\d+/text$'
                 if type(result) == list:
                     for r in result:
-                        play_occur = False
+                        new_play_occur = False
+                        mod_play_occur = False
                         if 'op' in r and r['op'] == 'add' and 'path' in r and r['path'] == '/plays/-':
                             play_text = r['value']['text']
                             play_id = r['value']['id']
                             play_clock = r['value']['clock']
                             play_period = r['value']['period']
-                            play_home_score = r['value']['homeScore']
-                            play_away_score = r['value']['awayScore']
-
-                            # if 'team' not in r['value']:
-                            #     print("no team")
-                            #     print(play_text)
-                            # team_id = r['value']['team']['id']
-                            # if team_id == home_team_id:
-                            #     play_home_away = 'home'
-                            # else:
-                            #     play_home_away = 'away'
 
                             global PLAY_IDX
                             
@@ -276,7 +268,9 @@ def on_message(ws, message):
                             print("[" + play_clock['displayValue'] + "] " + play_text)
                             incoming_messages.append("[" + play_clock['displayValue'] +" Q" + str(play_period['number']) + "] " + play_text)
 
-                            play_occur = True
+                            new_play_occur = True
+                            global cur_count
+                            cur_count += 1
 
                             if play_text == "End of Game":
                                 return
@@ -298,95 +292,95 @@ def on_message(ws, message):
                                 print(play_text)
                                 incoming_messages.append(play_text)
 
-                                play_occur = True
+                                mod_play_occur = True
+
                             else:
-                                # totallen = len(count_to_id)
-                                # print(id_to_play[count_to_id[totallen - 1]])
                                 print("the val")
                                 print(play_count)
-                                # print(count_to_id)
                                 print(play_text)
-                                
                                 print("og play doesnt exist to replace")
                                 return
                             
-                        if play_occur:
-                            global current_window_of_plays
-                            if play_id not in current_window_of_plays and "End of" not in play_text:
+                        if new_play_occur:
+                            if "End of" not in play_text:
                                 newdict = {"text": id_to_play_data[play_id]['text'], "id": id_to_play_data[play_id]['id'], "clock": id_to_play_data[play_id]['clock'], "period": id_to_play_data[play_id]['period'], "homeAway": id_to_play_data[play_id]['homeAway'] if "homeAway" in id_to_play_data[play_id] else ("home" if id_to_play_data[play_id]['team']['id'] == home_team_id else "away"), 
                                            "homeScore": id_to_play_data[play_id]['homeScore'], "awayScore": id_to_play_data[play_id]['awayScore']}
-                                current_window_of_plays[play_id] = newdict
-                            else:
-                                current_window_of_plays[play_id]["text"] = play_text
-                            added_play = current_window_of_plays[play_id]
-                            GAME_STATS, SUMMED_STATS = build_game_stats([added_play], GAME_STATS, SUMMED_STATS, game_info['team1'], game_info['team2'])
-                            parsed_play = parse_play_text(added_play['text'])
-                            del parsed_play['shot_type']
-                            if 'team' in parsed_play: del parsed_play['team']
-                            if 'points' in parsed_play: del parsed_play['points']
-                            
-                            for item in box_score_tree.get_children():
-                                for player in parsed_play.values():
-                                    if player in box_score_tree.item(item, "tags"):
-                                        statlist = [player, SUMMED_STATS[player]["points"],
-                                            SUMMED_STATS[player]["rebounds"],
-                                            SUMMED_STATS[player]["assists"],
-                                            SUMMED_STATS[player]["turnovers"],
-                                            str(SUMMED_STATS[player]["two_pointers_made"]) + "-" + str(SUMMED_STATS[player]["two_pointers_attempted"]),
-                                            str(SUMMED_STATS[player]["three_pointers_made"] )+ "-" + str(SUMMED_STATS[player]["three_pointers_attempted"]),
-                                            str(SUMMED_STATS[player]["free_throws_made"]) + "-" + str(SUMMED_STATS[player]["free_throws_attempted"]),
-                                            str(SUMMED_STATS[player]["field_goal_percentage"] * 100),
-                                            str(SUMMED_STATS[player]["three_point_percentage"] * 100),
-                                            SUMMED_STATS[player]["defensive_rebounds"],
-                                            SUMMED_STATS[player]["offensive_rebounds"],
-                                            SUMMED_STATS[player]["charges_taken"],
-                                            SUMMED_STATS[player]["personal_fouls"],
-                                            SUMMED_STATS[player]["shots_blocked"],
-                                            SUMMED_STATS[player]["steals"]
-                                            ]
-                                        box_score_tree.item(item, values=tuple(statlist))
-                                        break
-                            
+                                GAME_STATS, SUMMED_STATS = build_game_stats([newdict], GAME_STATS, SUMMED_STATS, game_info['team1'], game_info['team2'])
+                                chat_input.update_player_names(list(SUMMED_STATS.keys()))
 
-                        if len(current_window_of_plays) == 5:
+                                copydict = copy.deepcopy(newdict)
+                                del copydict['id']
+                                cur_moments.append(copydict)
+
+                                parsed_play = parse_play_text(newdict['text'])
+                                del parsed_play['shot_type']
+                                if 'team' in parsed_play: del parsed_play['team']
+                                if 'points' in parsed_play: del parsed_play['points']
+
+                                #update the row of that plauer
+                                for item in box_score_tree.get_children():
+                                    for player in parsed_play.values():
+                                        if player in box_score_tree.item(item, "tags"):
+                                            statlist = [player, SUMMED_STATS[player]["points"],
+                                                SUMMED_STATS[player]["rebounds"],
+                                                SUMMED_STATS[player]["assists"],
+                                                SUMMED_STATS[player]["turnovers"],
+                                                str(SUMMED_STATS[player]["two_pointers_made"]) + "-" + str(SUMMED_STATS[player]["two_pointers_attempted"]),
+                                                str(SUMMED_STATS[player]["three_pointers_made"] )+ "-" + str(SUMMED_STATS[player]["three_pointers_attempted"]),
+                                                str(SUMMED_STATS[player]["free_throws_made"]) + "-" + str(SUMMED_STATS[player]["free_throws_attempted"]),
+                                                str(SUMMED_STATS[player]["field_goal_percentage"] * 100),
+                                                str(SUMMED_STATS[player]["three_point_percentage"] * 100),
+                                                SUMMED_STATS[player]["defensive_rebounds"],
+                                                SUMMED_STATS[player]["offensive_rebounds"],
+                                                SUMMED_STATS[player]["charges_taken"],
+                                                SUMMED_STATS[player]["personal_fouls"],
+                                                SUMMED_STATS[player]["shots_blocked"],
+                                                SUMMED_STATS[player]["steals"]
+                                                ]
+                                            box_score_tree.item(item, values=tuple(statlist))
+                                            break
+
+                        if mod_play_occur:
+                            #not direct update                            
+                            pass
+
+                            
+                        if cur_count == 5:
+                            cur_count = 0
                             global key_moments_agg
-                            global global_compound_queries
                             global key_moment_length_since_last_query
                             
-                            key_moments_current = process_play_by_play(list(current_window_of_plays.values())) 
-                            key_moments_agg.extend(key_moments_current)
+                            key_moments_current = process_play_by_play(cur_moments) 
                             
-                            if len(key_moments_agg) > key_moment_length_since_last_query:
-                                print("querying\n")
-                                key_moment_length_since_last_query = len(key_moments_agg)
+                            print("querying\n")
 
-                                compound_queries = json.loads(generate_queries_with_gpt(key_moments_agg, game_info))
+                            compound_queries = json.loads(generate_queries_with_gpt(key_moments_current, game_info, game_context))
 
+                            cur_moments.clear()
+                            # compound_queries = compound_queries.strip().split('\n')
+                            # compound_queries = [q.strip() for q in compound_queries if q.strip()]
+                            # compound_queries = [re.sub(r'^\d+\.\s*', '', q.strip()) for q in compound_queries if q.strip()]
 
-                                # compound_queries = compound_queries.strip().split('\n')
-                                # compound_queries = [q.strip() for q in compound_queries if q.strip()]
-                                # compound_queries = [re.sub(r'^\d+\.\s*', '', q.strip()) for q in compound_queries if q.strip()]
+                            for cq in compound_queries:
+                                query = cq["query"]
+                                query_type = cq["type"]
+                                # print("---QUERY: " + cq)
+                                thelist = list(agent_executor.stream({"input": query + ". Make sure to restate your query in the answer."}))
+                                # print("----ANSWER---- " + thelist[-1]['output'])
+                                print(thelist[-1]['output'])
+                                print("------------------------------------------------------------------")
 
-                                for cq in compound_queries:
-                                    query = cq["query"]
-                                    query_type = cq["type"]
-                                    # print("---QUERY: " + cq)
-                                    thelist = list(agent_executor.stream({"input": query}))
-                                    # print("----ANSWER---- " + thelist[-1]['output'])
-                                    print(thelist[-1]['output'])
-                                    print("------------------------------------------------------------------")
-
-                                    #remove sentences that starts with "i couldnt"
-                                    #break into sentences
-                                    sentences = thelist[-1]['output'].split('. ')
-                                    sentences = [s for s in sentences if not s.startswith("I couldn't")]
-                                    thelist[-1]['output'] = '. '.join(sentences)
+                                #remove sentences that starts with "i couldnt"
+                                #break into sentences
+                                # sentences = thelist[-1]['output'].split('. ')
+                                # sentences = [s for s in sentences if not s.startswith("I couldn't")]
+                                # thelist[-1]['output'] = '. '.join(sentences)
 
 
-                                    query_output.append(thelist[-1]['output'])
-                                    running_list.delete(1.0, tk.END)
-                                    running_list.insert(tk.END, "\n\n".join(query_output))  # Show last 20 messages
-                                    running_list.see(tk.END)
+                                query_output.append(thelist[-1]['output'])
+                                running_list.delete(1.0, tk.END)
+                                running_list.insert(tk.END, "\n\n".join(query_output))  # Show last 20 messages
+                                running_list.see(tk.END)
                         
                             current_window_of_plays = {}
 
@@ -441,7 +435,7 @@ def on_open(ws):
             id_to_play_data[play_id] = play
             count_to_id[i] = play_id
 
-            incoming_messages.append(str(i) + "     " + "[" + play['clock']['displayValue'] +" Q" + str(play['period']['number']) + "] " + play_text)
+            incoming_messages.append("[" + play['clock']['displayValue'] +" Q" + str(play['period']['number']) + "] " + play_text)
 
 
         global PLAY_IDX
@@ -452,9 +446,7 @@ def on_open(ws):
         global SUMMED_STATS
         print("calling build")
         GAME_STATS, SUMMED_STATS = build_game_stats(raw_all_plays, GAME_STATS,SUMMED_STATS, game_info['team1'], game_info['team2'])
-        # print(GAME_STATS['team_stats'].keys())
-        # print(GAME_STATS['player_stats'].keys())
-        # print(json.dumps(SUMMED_STATS, indent=4))
+        chat_input.update_player_names(list(SUMMED_STATS.keys()))
 
         #export the gamestats json
         with open('game_stats.json', 'w') as f:
@@ -514,7 +506,7 @@ def start_websocket(url):
 def start_websocket_thread():
     # Launch the WebSocket listener in a separate thread.
     # ws_uri = "wss://echo.websocket.org"
-    ws_uri = "wss://espn.connections.edge.bamgrid.com/66990c/connection?X-Application-Version=0.0.1&X-BAMSDK-Client-ID=espn-a9b93989&X-BAMSDK-Platform=javascript/macosx/chrome&X-BAMSDK-Version=27.1&X-Request-ID=&X-Request-Id=ec735d0f-b6f0-407f-9780-a2edde5b79ee"
+    ws_uri = "wss://pw6bed2db0-1e81-45f4-9450-fb68873caf98-54-202-110-36.fastcast.semfs.engsvc.go.com:9573/FastcastService/pubsub/profiles/12000?TrafficManager-Token=MTc0NjA3NDYwNDg3MA==:zWzjV7r/woxqPGbPPjIIanZx6vs="
     ws_thread = threading.Thread(target=start_websocket, args=(ws_uri,))
     ws_thread.daemon = True
     ws_thread.start()
@@ -599,9 +591,9 @@ title_frame.grid(row=0, column=0, columnspan=2, pady=0, sticky="ew")
 title_label = tk.Label(title_frame, text=game_info["team2"] + " at " + game_info['team1'], font=("Arial", 20, "bold"), fg=header_fg, bg=nba_blue)
 title_label.grid(row=0, column=0, sticky="w", padx=10)
 
-# Subtitle Text
-# subtitle_label = tk.Label(title_frame, text=game_info['date'], font=("Arial", 14),fg=header_fg, bg=nba_blue)
-# subtitle_label.grid(row=1, column=0, sticky="w", padx=10)
+subtitle_label = tk.Label(title_frame, text="", font=("Arial", 14),fg=header_fg, bg=nba_blue)
+subtitle_label.grid(row=1, column=0, sticky="w", padx=10)
+
 
 # Top Left: WebSocket Panel
 websocket_frame = tk.Frame(root, bg=dark_bg, padx=10, pady=5)
@@ -639,8 +631,43 @@ box_score_frame.grid(row=1, column=1, sticky="nsew")
 # Box Score Sub-Panel
 box_score_label = tk.Label(box_score_frame, text="Box Score", font=("Arial", 14), fg=header_fg, bg=dark_bg)
 box_score_label.pack()
-box_score_tree = ttk.Treeview(box_score_frame, columns=("Player", "PTS", "REB", "AST", "TO", "2PT", "3PT", "FT", "FG %", "3PT %", "DREB", "OREB", "CHRG", "PF", "BLK", "STL"), show="headings", height=20)
-box_score_tree.pack()
+
+columns = ("Player", "PTS", "REB", "AST", "TO", "2PT", "3PT", "FT", "FG %", "3PT %", "DREB", "OREB", "CHRG", "PF", "BLK", "STL")
+box_score_tree = ttk.Treeview(
+    box_score_frame,
+    columns=columns,
+    show="headings",
+    height=20
+)
+box_score_tree.pack(fill="both", expand=True)
+
+for col in columns:
+    box_score_tree.heading(col, text=col)
+
+sort_directions = {col: False for col in columns}
+
+def sort_by_column(col):
+    col_index = columns.index(col)
+    items = list(box_score_tree.get_children())
+
+    def try_cast(val):
+        try:
+            return float(val)
+        except ValueError:
+            return val.lower()
+
+    values = [(box_score_tree.set(k, col), k) for k in items]
+    values.sort(key=lambda x: try_cast(x[0]), reverse=sort_directions[col])
+
+    for index, (_, k) in enumerate(values):
+        box_score_tree.move(k, '', index)
+
+    sort_directions[col] = not sort_directions[col]
+
+for col in columns:
+    box_score_tree.heading(col, text=col, command=lambda _col=col: sort_by_column(_col))
+
+
 
 style = ttk.Style()
 style.configure("Treeview", background=treeview_bg, foreground=treeview_fg, fieldbackground=treeview_bg)
@@ -687,12 +714,6 @@ box_score_tree.column("PF", width=50)
 box_score_tree.column("BLK", width=50)
 box_score_tree.column("STL", width=50)
 
-# Running List Sub-Panel
-# running_list_label = tk.Label(box_score_frame, text="Running List (WebSocket Messages)", font=("Arial", 14))
-# running_list_label.pack()
-# running_list_text = tk.Text(box_score_frame, wrap=tk.WORD, height=8, width=40)
-# running_list_text.pack()
-
 # Bottom Left: Chat Interface
 chat_frame = tk.Frame(root, bg=dark_bg, padx=5, pady=5)
 chat_frame.grid(row=2, column=0, sticky="nsew")
@@ -700,8 +721,10 @@ chat_label = tk.Label(chat_frame, text="Chat Interface", font=("Arial", 14), fg=
 chat_label.pack()
 chat_text = tk.Text(chat_frame, wrap=tk.WORD, height=10, width=40, fg=text_fg, bg=light_bg)
 chat_text.pack(expand=True, fill="both")
-chat_input = tk.Entry(chat_frame, width=30, fg=text_fg, bg=light_bg)
-chat_input.pack(pady=5)
+# chat_input = tk.Entry(chat_frame, width=30, fg=text_fg, bg=light_bg)
+chat_input = AutocompleteEntry(list(SUMMED_STATS.keys()), chat_frame, width=50)
+chat_input.pack()
+chat_input.bind("<Return>", lambda event: on_button_click())
 chat_send_btn = tk.Button(chat_frame, text="Send", command=on_button_click, fg=nba_blue, bg=nba_blue, activebackground="#0056b3"  )  # Replace with chat logic
 chat_send_btn.pack()
 

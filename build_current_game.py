@@ -22,10 +22,10 @@ def build_game_stats(play_data, game_stats, summed_stats, hometeam, awayteam):
         
         players_team = hometeam if homeAway == "home" else awayteam
 
-        if "Chet Holmgren" in play["text"]:
-            print(play["text"])
-            print(players_team)
-            print(parsed_play)
+        # if "makes" in play["text"]:
+        #     print(play["text"])
+        #     print(players_team)
+        #     print(parsed_play)
         
         if parsed_play['shot_type'] == "free_throw" or parsed_play['shot_type'] == "two_pointer" or parsed_play['shot_type'] == "three_pointer":
             points, scorer, shot_type = parsed_play.get("points"), parsed_play.get("scorer"), parsed_play.get("shot_type")
@@ -38,7 +38,6 @@ def build_game_stats(play_data, game_stats, summed_stats, hometeam, awayteam):
 
             
             if scorer:
-                
                 stats["player_stats"][players_team][scorer][quarter]["points"] += points
                 summed_stats[scorer]["points"] += points
                 if shot_type == "two_pointer":
@@ -166,6 +165,8 @@ def build_game_stats(play_data, game_stats, summed_stats, hometeam, awayteam):
             stats["team_stats"][players_team][quarter]["bad_passes"] += 1
             summed_stats[stealer]["steals"] += 1
             summed_stats[passer]["bad_passes"] += 1
+        elif parsed_play['shot_type'] == 'team_turnover':
+            stats["team_stats"][players_team][quarter]["turnovers"] += 1
         elif parsed_play['shot_type'] == 'bad_pass':
             passer = parsed_play.get("passer")
             stats["player_stats"][players_team][passer][quarter]["bad_passes"] += 1
