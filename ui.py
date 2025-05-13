@@ -181,13 +181,13 @@ agent = (
 agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=False)
 
 #----START HERE ----
-game_id = 401768058
+game_id = 401769838
 game_url = f"https://www.espn.com/nba/playbyplay/_/gameId/{game_id}"
 game_info = {
-    'team1': 'Los Angeles Lakers', #home
-    'team2': 'Minnesota Timberwolves', #away
+    'team1': 'Minnesota Timberwolves', #home
+    'team2': 'Golden State Warriors', #away
 }
-game_context = "This is game 5 of a first round playoff series between the Lakers and Timberwolves."
+game_context = "This is game 2 of the western conference semifinals. Stephen Curry is out of the game with a hamstring injury. The Warriors beat the Rockets in round 1 and the Timberwolves beat the Lakers in round 1."
 
 cur_count = 0
 cur_moments = []
@@ -506,7 +506,7 @@ def start_websocket(url):
 def start_websocket_thread():
     # Launch the WebSocket listener in a separate thread.
     # ws_uri = "wss://echo.websocket.org"
-    ws_uri = "wss://pw6bed2db0-1e81-45f4-9450-fb68873caf98-54-202-110-36.fastcast.semfs.engsvc.go.com:9573/FastcastService/pubsub/profiles/12000?TrafficManager-Token=MTc0NjA3NDYwNDg3MA==:zWzjV7r/woxqPGbPPjIIanZx6vs="
+    ws_uri = "wss://pwee1ac52e-e1c7-49a5-9190-0c9e748e5f4e-54-212-16-79.fastcast.semfs.engsvc.go.com:9573/FastcastService/pubsub/profiles/12000?TrafficManager-Token=MTc0Njc1ODM5MDY5OQ==:Fo/7RMnd35Df56qeF1Wc8hvk0bM="
     ws_thread = threading.Thread(target=start_websocket, args=(ws_uri,))
     ws_thread.daemon = True
     ws_thread.start()
